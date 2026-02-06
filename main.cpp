@@ -4,13 +4,13 @@
 #include <fstream>
 #include <memory>
 #include <ctime>
+#include <iomanip>
+#include <algorithm>
 
 using namespace std;
 
-
 using Waluta = double;
 using Ilosc = int;
-
 
 class Lek;
 
@@ -38,8 +38,9 @@ public:
     void zmienIlosc(Ilosc nowaIlosc) { ilosc = nowaIlosc; }
 
     virtual void wyswietlInfo() const {
-        cout << "Lek: " << nazwa << " | Cena: " << cena << " PLN | Stan: " << ilosc
-                << (naRecepte ? " [RX - Na recepte]" : " [Bez recepty]") << endl;
+        cout << "Lek: " << setw(12) << left << nazwa
+             << " | Cena: " << setw(6) << cena << " PLN | Stan: " << setw(3) << ilosc
+             << (naRecepte ? " [RX - Na recepte]" : " [Bez recepty]") << endl;
     }
 
     Lek &operator+=(Ilosc dodatek) {
@@ -55,17 +56,15 @@ ostream &operator<<(ostream &os, const Lek &l) {
     return os;
 }
 
-
 class Antybiotyk : public Lek {
 public:
     Antybiotyk(string n, Waluta c, Ilosc i) : Lek(n, c, i, true) {
     }
 
-
     void wyswietlInfo() const override {
         cout << "[ANTYBIOTYK] ";
         Lek::wyswietlInfo();
-        cout << "   -> UWAGA: Wymagana ścisła kontrola recepty!" << endl;
+        cout << "             -> Wymagana weryfikacja recepty" << endl;
     }
 };
 
@@ -75,7 +74,7 @@ public:
     }
 
     void wyswietlInfo() const override {
-        cout << "[SUPLEMENT] ";
+        cout << "[SUPLEMENT]  ";
         Lek::wyswietlInfo();
     }
 };
@@ -100,6 +99,14 @@ public:
         return nullptr;
     }
 
+    double obliczWartoscCalkowita() {
+        double suma = 0;
+        for (auto &produkt : asortyment) {
+            suma += (produkt->getCena() * produkt->getIlosc());
+        }
+        return suma;
+    }
+
     void wyswietlStan() {
         cout << "\n--- STAN MAGAZYNU ---" << endl;
         if (asortyment.empty()) {
@@ -113,6 +120,26 @@ public:
     }
 };
 
+template <typename T>
+void wypiszKomunikat(T komunikat) {
+    cout << "\n>>> SYSTEM:   4"
+            "" << komunikat << " <<<" << endl;
+}
+
+void archiwizujTransakcje(string kto, string co, double kwota) {
+    ofstream plik("historia_transakcji.txt", ios::app);
+    if (plik.good()) {
+        time_t now = time(0);
+        char *dt = ctime(&now);
+        string czas = dt;
+        czas.pop_back();
+
+        plik << "[" << czas << "] Uzytkownik: " << kto
+             << " | Operacja: " << co << " | Kwota: " << kwota << " PLN" << endl;
+    }
+    plik.close();
+}
+
 class Uzytkownik {
 protected:
     string login;
@@ -125,25 +152,9 @@ public:
     }
 
     virtual void pokazMenu() = 0;
-
     string getLogin() { return login; }
 };
 
-void archiwizujTransakcje(string kto, string co, double kwota) {
-    ofstream plik("historia_transakcji.txt", ios::app);
-    if (plik.good()) {
-        time_t now = time(0);
-        char *dt = ctime(&now);
-        string czas = dt;
-        czas.pop_back();
-
-        plik << "[" << czas << "] Uzytkownik: " << kto
-                << " | Sprzedano: " << co << " | Kwota: " << kwota << " PLN" << endl;
-    }
-    plik.close();
-}
-
-// Klasa Farmaceuta
 class Farmaceuta : public Uzytkownik {
 public:
     Farmaceuta(string l) : Uzytkownik(l) {
@@ -159,17 +170,17 @@ public:
             if (lek->getIlosc() > 0) {
                 if (lek->czyNaRecepte()) {
                     char odp;
-                    cout << "Lek WYMAGA recepty. Czy klient okazal wazna recepte? (t/n): ";
+                    cout << "LEK NA RECEPTE (" << nazwa << ")" << endl;
+                    cout << "Czy klient okazal wazna recepte? (t/n): ";
                     cin >> odp;
                     if (odp != 't' && odp != 'T') {
-                        cout << "ODMOWA SPRZEDAZY: Brak recepty!" << endl;
+                        cout << "ODMOWA SPRZEDAZY: Brak recepty" << endl;
                         return;
                     }
                 }
-
                 lek->zmienIlosc(lek->getIlosc() - 1);
                 cout << "Sprzedano: " << *lek << endl;
-                archiwizujTransakcje(login, lek->getNazwa(), lek->getCena());
+                archiwizujTransakcje(login, "Sprzedaz: " + lek->getNazwa(), lek->getCena());
             } else {
                 cout << "Brak towaru na stanie" << endl;
             }
@@ -180,12 +191,11 @@ public:
 
     void pokazMenu() override {
         cout << "\n[Panel Farmaceuty: " << login << "]" << endl;
-        cout << "1. Sprzedaj lek" << endl;
+        cout << "1. Sprzedaj lek (Tryb reczny)" << endl;
         cout << "2. Sprawdz dostepnosc" << endl;
         cout << "3. Wyloguj" << endl;
     }
 };
-
 
 class Administrator : public Uzytkownik {
 public:
@@ -202,19 +212,106 @@ public:
         if (lek) {
             cout << "Podaj ilosc do domowienia: ";
             cin >> ilosc;
-            *lek += ilosc;
-            cout << "Zaktualizowano stan. Nowa ilosc: " << lek->getIlosc() << endl;
-            archiwizujTransakcje(login, "ZAMOWIENIE: " + nazwa, 0);
+            if(ilosc > 0) {
+                *lek += ilosc;
+                cout << "Zaktualizowano stan. Nowa ilosc: " << lek->getIlosc() << endl;
+                archiwizujTransakcje(login, "ZAMOWIENIE: " + nazwa, 0);
+            } else { cout << "Ilosc musi byc dodatnia." << endl; }
         } else {
-            cout << "Leku nie ma w bazie. (Funkcja dodawania nowego leku - TODO)" << endl;
+            cout << "Leku nie ma w bazie." << endl;
         }
+    }
+
+    void generujRaport(Magazyn<Lek> &magazyn) {
+        double wartosc = magazyn.obliczWartoscCalkowita();
+        cout << "\n=== RAPORT FINANSOWY ===" << endl;
+        cout << "Calkowita wartosc towaru: " << wartosc << " PLN" << endl;
+        cout << "========================" << endl;
     }
 
     void pokazMenu() override {
         cout << "\n[Panel Administratora: " << login << "]" << endl;
-        cout << "1. Zamow towar (Dostawa)" << endl;
-        cout << "2. Wyswietl caly magazyn" << endl;
-        cout << "3. Wyloguj" << endl;
+        cout << "1. Zamow towar" << endl;
+        cout << "2. Wyswietl magazyn" << endl;
+        cout << "3. Raport wartosci" << endl;
+        cout << "4. Wyloguj" << endl;
+    }
+};
+
+class Klient : public Uzytkownik {
+private:
+    vector<string> recepty;
+
+public:
+    Klient(string l) : Uzytkownik(l) {}
+
+    void dodajRecepte(string nazwaLeku) {
+        recepty.push_back(nazwaLeku);
+    }
+
+    void pokazMojeRecepty() {
+        cout << "Twoje e-recepty: ";
+        if (recepty.empty()) {
+            cout << "(Brak)" << endl;
+        } else {
+            for (const auto& r : recepty) {
+                cout << "[" << r << "] ";
+            }
+            cout << endl;
+        }
+    }
+
+    void kupSamoobslugowo(Magazyn<Lek> &magazyn) {
+        string nazwa;
+        cout << "Podaj nazwe leku: ";
+        cin >> nazwa;
+
+        auto lek = magazyn.znajdzProdukt(nazwa);
+        if (lek) {
+            if (lek->czyNaRecepte()) {
+                cout << "BLAD: Lek '" << nazwa << "' wymaga recepty. Zrealizuj Recepte." << endl;
+            } else {
+                if (lek->getIlosc() > 0) {
+                    lek->zmienIlosc(lek->getIlosc() - 1);
+                    cout << "Kupiles: " << *lek << endl;
+                    archiwizujTransakcje(login, "Zakup wlasny: " + lek->getNazwa(), lek->getCena());
+                } else cout << "Brak towaru." << endl;
+            }
+        } else cout << "Nie znaleziono produktu." << endl;
+    }
+
+    void zrealizujRecepte(Magazyn<Lek> &magazyn) {
+        string nazwa;
+        cout << "(Realizacja Recepty) Podaj nazwe leku: ";
+        cin >> nazwa;
+
+        auto it = find(recepty.begin(), recepty.end(), nazwa);
+
+        if (it != recepty.end()) {
+            auto lek = magazyn.znajdzProdukt(nazwa);
+            if (lek) {
+                if (lek->getIlosc() > 0) {
+                    lek->zmienIlosc(lek->getIlosc() - 1);
+                    cout << "Zrealizowano recepte na: " << *lek << endl;
+                    archiwizujTransakcje(login, "Realizacja recepty: " + lek->getNazwa(), lek->getCena());
+
+                    recepty.erase(it);
+                    cout << "(Recepta zostala wykorzystana i usunieta z systemu)" << endl;
+
+                } else cout << "Mamy Twoja recepte, ale brak leku w magazynie." << endl;
+            } else cout << "Nie mamy takiego leku w systemie." << endl;
+        } else {
+            cout << "Nie posiadasz recepty na lek '" << nazwa << "'!" << endl;
+        }
+    }
+
+    void pokazMenu() override {
+        cout << "\n[Panel Klienta: " << login << "]" << endl;
+        pokazMojeRecepty();
+        cout << "1. Przegladaj asortyment" << endl;
+        cout << "2. Kup produkt bez recepty (OTC)" << endl;
+        cout << "3. Zrealizuj recepte (RX)" << endl;
+        cout << "4. Wyloguj" << endl;
     }
 };
 
@@ -229,19 +326,26 @@ public:
         magazyn.dodajProdukt(make_shared<Lek>("Apap", 15.50, 10, false));
         magazyn.dodajProdukt(make_shared<Antybiotyk>("Augmentin", 45.00, 5));
         magazyn.dodajProdukt(make_shared<Suplement>("WitaminaC", 9.99, 50));
-        magazyn.dodajProdukt(make_shared<Lek>("Ibuprom", 18.20, 0, false)); // Brak stanu
+        magazyn.dodajProdukt(make_shared<Lek>("Ibuprom", 18.20, 2, false));
+        magazyn.dodajProdukt(make_shared<Antybiotyk>("Duomox", 32.00, 8));
 
         uzytkownicy.push_back(make_shared<Farmaceuta>("Farmaceuta"));
-        uzytkownicy.push_back(make_shared<Administrator>("Administrator"));
+        uzytkownicy.push_back(make_shared<Administrator>("Admin"));
+
+        auto klientKowalski = make_shared<Klient>("Klient");
+        klientKowalski->dodajRecepte("Augmentin");
+
+        uzytkownicy.push_back(klientKowalski);
     }
 
     void uruchom() {
-        cout << "Witaj w Systemie Aptecznym v1.0" << endl;
+        wypiszKomunikat("Witaj w Systemie Aptecznym");
 
         while (true) {
-            cout << "\nwybierz uzytkownika:" << endl;
+            cout << "\nZaloguj sie jako:" << endl;
             cout << "1. Farmaceuta" << endl;
             cout << "2. Administrator" << endl;
+            cout << "3. Klient (Panel Pacjenta)" << endl;
             cout << "0. Wyjscie" << endl;
             cout << "Wybor: ";
 
@@ -252,9 +356,9 @@ public:
 
             shared_ptr<Uzytkownik> obecnyUzytkownik = nullptr;
 
-            if (wybor == 1) obecnyUzytkownik = uzytkownicy[0];
-            else if (wybor == 2) obecnyUzytkownik = uzytkownicy[1];
-            else {
+            if (wybor >= 1 && wybor <= 3) {
+                obecnyUzytkownik = uzytkownicy[wybor - 1];
+            } else {
                 cout << "Niepoprawny wybor." << endl;
                 continue;
             }
@@ -268,25 +372,31 @@ public:
 
                 auto farmaceuta = dynamic_pointer_cast<Farmaceuta>(obecnyUzytkownik);
                 auto admin = dynamic_pointer_cast<Administrator>(obecnyUzytkownik);
+                auto klient = dynamic_pointer_cast<Klient>(obecnyUzytkownik);
 
                 if (farmaceuta) {
                     switch (opcja) {
-                        case 1: farmaceuta->sprzedajLek(magazyn);
-                            break;
-                        case 2: magazyn.wyswietlStan();
-                            break;
-                        case 3: zalogowany = false;
-                            break;
+                        case 1: farmaceuta->sprzedajLek(magazyn); break;
+                        case 2: magazyn.wyswietlStan(); break;
+                        case 3: zalogowany = false; break;
                         default: cout << "Nieznana opcja." << endl;
                     }
-                } else if (admin) {
+                }
+                else if (admin) {
                     switch (opcja) {
-                        case 1: admin->zamowTowar(magazyn);
-                            break;
-                        case 2: magazyn.wyswietlStan();
-                            break;
-                        case 3: zalogowany = false;
-                            break;
+                        case 1: admin->zamowTowar(magazyn); break;
+                        case 2: magazyn.wyswietlStan(); break;
+                        case 3: admin->generujRaport(magazyn); break;
+                        case 4: zalogowany = false; break;
+                        default: cout << "Nieznana opcja." << endl;
+                    }
+                }
+                else if (klient) {
+                    switch (opcja) {
+                        case 1: magazyn.wyswietlStan(); break;
+                        case 2: klient->kupSamoobslugowo(magazyn); break;
+                        case 3: klient->zrealizujRecepte(magazyn); break;
+                        case 4: zalogowany = false; break;
                         default: cout << "Nieznana opcja." << endl;
                     }
                 }
